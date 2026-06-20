@@ -1,0 +1,7 @@
+global_setting: 15 #interval in seconds
+
+scrape_configs:
+  - job_name: "knowledge-base-api"
+    static_configs:
+      - targets: ["kb-api:8000"]
+    metrics_path: /metrics

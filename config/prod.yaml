@@ -1,0 +1,83 @@
+# ─── Embedding ─────────────────────────────────────────────────────────────────
+embedding:
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  batch_size: 128
+  device: cpu
+  normalize: true
+  cache_dir: /app/data/models
+
+# ─── Vector Store ──────────────────────────────────────────────────────────────
+vector_store:
+  provider: qdrant
+  qdrant:
+    url: http://qdrant:6333
+    api_key: null
+    prefer_grpc: true
+    timeout: 60
+
+# ─── Reranker ──────────────────────────────────────────────────────────────────
+reranker:
+  enabled: true
+  model: BAAI/bge-reranker-v2-m3
+  device: cpu
+  batch_size: 32
+  top_k: 10
+
+# ─── Parsers ───────────────────────────────────────────────────────────────────
+parsers:
+  pdf:
+    primary: docling
+    fallback: pymupdf
+    ocr_fallback: true
+  ocr:
+    enabled: true
+    engine: tesseract
+
+# ─── Chunking ──────────────────────────────────────────────────────────────────
+chunking:
+  strategy: hierarchical
+  chunk_size: 750
+  chunk_overlap: 100
+  min_chunk_size: 100
+
+# ─── Retrieval ─────────────────────────────────────────────────────────────────
+retrieval:
+  top_k: 20
+  dense_weight: 0.7
+  bm25_weight: 0.3
+  final_top_k: 10
+  rrf_k: 60
+
+# ─── VLM ───────────────────────────────────────────────────────────────────────
+vlm:
+  enabled: false
+
+# ─── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  data_dir: /app/data
+  knowledge_bases_dir: /app/data/knowledge_bases
+  uploads_dir: /app/data/uploads
+  logs_dir: /app/data/logs
+  models_dir: /app/data/models
+
+# ─── Observability ─────────────────────────────────────────────────────────────
+observability:
+  log_level: INFO
+  structured_logging: true
+  otel_enabled: false
+  otel_endpoint: http://otel-collector:4317
+  prometheus_enabled: true
+
+# ─── API ───────────────────────────────────────────────────────────────────────
+api:
+  host: 0.0.0.0
+  port: 8000
+  workers: 4
+  cors_origins:
+    - "https://your-frontend.example.com"
+  max_upload_size_mb: 200
+
+# ─── Database ──────────────────────────────────────────────────────────────────
+database:
+  url: sqlite+aiosqlite:////app/data/knowledge_base.db

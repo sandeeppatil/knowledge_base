@@ -1,0 +1,91 @@
+# ─── Embedding ─────────────────────────────────────────────────────────────────
+embedding:
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  batch_size: 64
+  device: cpu
+  normalize: true
+  cache_dir: ./data/models
+
+# ─── Vector Store ──────────────────────────────────────────────────────────────
+vector_store:
+  provider: qdrant
+  qdrant:
+    url: http://localhost:6333
+    api_key: null
+    prefer_grpc: false
+    timeout: 30
+  chroma:
+    host: localhost
+    port: 8001
+  faiss:
+    index_path: ./data/faiss_indices
+
+# ─── Reranker ──────────────────────────────────────────────────────────────────
+reranker:
+  enabled: true
+  model: BAAI/bge-reranker-v2-m3
+  device: cpu
+  batch_size: 16
+  top_k: 10
+
+# ─── Parsers ───────────────────────────────────────────────────────────────────
+parsers:
+  pdf:
+    primary: docling
+    fallback: pymupdf
+    ocr_fallback: true
+  ocr:
+    enabled: true
+    engine: tesseract
+
+# ─── Chunking ──────────────────────────────────────────────────────────────────
+chunking:
+  strategy: hierarchical
+  chunk_size: 750
+  chunk_overlap: 100
+  min_chunk_size: 100
+
+# ─── Retrieval ─────────────────────────────────────────────────────────────────
+retrieval:
+  top_k: 20
+  dense_weight: 0.7
+  bm25_weight: 0.3
+  final_top_k: 10
+  rrf_k: 60
+
+# ─── VLM ───────────────────────────────────────────────────────────────────────
+vlm:
+  enabled: false
+  provider: ollama
+  model: qwen2.5-vl:7b
+  ollama_url: http://localhost:11434
+
+# ─── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  data_dir: ./data
+  knowledge_bases_dir: ./data/knowledge_bases
+  uploads_dir: ./data/uploads
+  logs_dir: ./data/logs
+  models_dir: ./data/models
+
+# ─── Observability ─────────────────────────────────────────────────────────────
+observability:
+  log_level: DEBUG
+  structured_logging: true
+  otel_enabled: false
+  prometheus_enabled: true
+
+# ─── API ───────────────────────────────────────────────────────────────────────
+api:
+  host: 0.0.0.0
+  port: 8000
+  workers: 1
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+  max_upload_size_mb: 100
+
+# ─── Database ──────────────────────────────────────────────────────────────────
+database:
+  url: sqlite+aiosqlite:///./data/knowledge_base.db

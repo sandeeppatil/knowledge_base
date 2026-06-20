@@ -1,0 +1,45 @@
+site_name: Knowledge Base Platform
+site_description: Production-grade local RAG platform for enterprise knowledge management
+site_author: Knowledge Base Team
+repo_url: https://github.com/your-org/knowledge-base
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.annotate
+    - content.code.copy
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Developer Guide:
+      - Extending: developer-guide/extending.md
+  - Operations:
+      - Runbooks: operations/runbooks.md
+  - Roadmap: roadmap.md

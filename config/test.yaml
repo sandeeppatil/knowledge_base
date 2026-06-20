@@ -1,0 +1,81 @@
+# ─── Embedding ─────────────────────────────────────────────────────────────────
+embedding:
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  batch_size: 32
+  device: cpu
+  normalize: true
+  cache_dir: /tmp/test_models
+
+# ─── Vector Store ──────────────────────────────────────────────────────────────
+vector_store:
+  provider: qdrant
+  qdrant:
+    url: http://localhost:6333
+    api_key: null
+    prefer_grpc: false
+    timeout: 10
+
+# ─── Reranker ──────────────────────────────────────────────────────────────────
+reranker:
+  enabled: false
+  model: BAAI/bge-reranker-v2-m3
+  device: cpu
+  batch_size: 8
+  top_k: 5
+
+# ─── Parsers ───────────────────────────────────────────────────────────────────
+parsers:
+  pdf:
+    primary: pymupdf
+    fallback: pymupdf
+    ocr_fallback: false
+  ocr:
+    enabled: false
+    engine: tesseract
+
+# ─── Chunking ──────────────────────────────────────────────────────────────────
+chunking:
+  strategy: hierarchical
+  chunk_size: 500
+  chunk_overlap: 50
+  min_chunk_size: 50
+
+# ─── Retrieval ─────────────────────────────────────────────────────────────────
+retrieval:
+  top_k: 10
+  dense_weight: 0.7
+  bm25_weight: 0.3
+  final_top_k: 5
+  rrf_k: 60
+
+# ─── VLM ───────────────────────────────────────────────────────────────────────
+vlm:
+  enabled: false
+
+# ─── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  data_dir: /tmp/kb_test
+  knowledge_bases_dir: /tmp/kb_test/knowledge_bases
+  uploads_dir: /tmp/kb_test/uploads
+  logs_dir: /tmp/kb_test/logs
+  models_dir: /tmp/test_models
+
+# ─── Observability ─────────────────────────────────────────────────────────────
+observability:
+  log_level: WARNING
+  structured_logging: false
+  otel_enabled: false
+  prometheus_enabled: false
+
+# ─── API ───────────────────────────────────────────────────────────────────────
+api:
+  host: 127.0.0.1
+  port: 8001
+  workers: 1
+  cors_origins: []
+  max_upload_size_mb: 10
+
+# ─── Database ──────────────────────────────────────────────────────────────────
+database:
+  url: sqlite+aiosqlite:///./data/test_knowledge_base.db
