@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency manifests
-COPY pyproject.toml .
+COPY pyproject.toml README.md .
 
 # Install into a virtual environment for clean copy
 RUN python -m venv /opt/venv
@@ -89,4 +89,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Entry point
 CMD ["python", "-m", "uvicorn", "src.api.app:app", \
      "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "4", "--log-config", "/dev/null"]
+     "--workers", "4"]
