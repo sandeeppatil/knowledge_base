@@ -26,6 +26,7 @@ ENV/
 data/
 !data/.gitkeep
 models/
+!src/domain/models/
 *.bin
 *.onnx
 *.pt
