@@ -35,6 +35,8 @@ class KnowledgeBase(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     last_indexed_at: Optional[datetime] = Field(None)
     metadata: dict = Field(default_factory=dict, description="Custom metadata")
+    version: str = Field(default="1.0.0", description="KB schema version")
+    is_active: bool = Field(default=True, description="Whether KB is active")
 
     class Config:
         """Pydantic config."""

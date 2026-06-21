@@ -6,6 +6,7 @@ They depend only on domain interfaces, never on concrete implementations.
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -67,11 +68,23 @@ class KnowledgeBaseService:
         if existing:
             raise ValueError(f"Knowledge base '{name}' already exists.")
 
+        # Generate KB ID and collection name
+        kb_id = str(uuid.uuid4())
+        collection_name = f"kb_{kb_id.replace('-', '_')}"
+        
+        # Get embedding dimension from provider
+        embedding_dimension = self._embedder.dimension
+        embedding_model_name = embedding_model or self._embedder.model_name
+        vector_store_type = vector_store_provider or "qdrant"
+
         kb = KnowledgeBase(
+            id=kb_id,
             name=name,
             description=description,
-            embedding_model=embedding_model or self._embedder.model_name,
-            vector_store=vector_store_provider or "qdrant",
+            embedding_model=embedding_model_name,
+            embedding_dimension=embedding_dimension,
+            vector_store_type=vector_store_type,
+            collection_name=collection_name,
             metadata=metadata or {},
         )
         kb = await self._repo.create_kb(kb)

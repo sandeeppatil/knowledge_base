@@ -1,0 +1,12 @@
+{
+    "servers": {
+      "knowledge-base": {
+        "command": "uv",
+        "args": ["run", "python", "-m", "src.mcp.server"],
+        "cwd": "/home/sandeep/workspace/kb",
+        "env": {
+          "PYTHONPATH": "/home/sandeep/workspace/kb"
+        }
+      }
+    }
+}

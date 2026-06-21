@@ -61,7 +61,7 @@ class KBResponse(BaseModel):
             created_at=kb.created_at.isoformat(),
             updated_at=kb.updated_at.isoformat(),
             embedding_model=kb.embedding_model,
-            vector_store=kb.vector_store,
+            vector_store=kb.vector_store_type,
             version=kb.version,
             is_active=kb.is_active,
             metadata=kb.metadata,

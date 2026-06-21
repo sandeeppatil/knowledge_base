@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import hashlib
 import time
+import uuid
+import mimetypes
 from pathlib import Path
 
 from src.domain.interfaces import EmbeddingProvider, KBRepository, VectorStore
-from src.domain.models.document import Document, DocumentStatus
+from src.domain.models.document import Document, DocumentStatus, DocumentType
 from src.domain.models.knowledge_base import KnowledgeBase
 from src.domain.events.domain_events import DocumentIngested, DocumentIngestionFailed
 from src.monitoring.logging import get_logger
@@ -97,21 +99,49 @@ class IngestionPipeline:
         checksum = self._compute_checksum(file_path)
 
         # ── Create document record ───────────────────────────────────────
-        document = Document.from_path(file_path, kb.id)
-        document.checksum = checksum
+        doc_id = str(uuid.uuid4())
+        mime_type, _ = mimetypes.guess_type(file_path)
+        mime_type = mime_type or "application/octet-stream"
+        
+        # Determine document type from file extension
+        suffix = file_path.suffix.lower()
+        if suffix == ".pdf":
+            doc_type = DocumentType.PDF
+        elif suffix in {".md", ".markdown"}:
+            doc_type = DocumentType.MARKDOWN
+        elif suffix in {".txt"}:
+            doc_type = DocumentType.TEXT
+        elif suffix in {".html", ".htm"}:
+            doc_type = DocumentType.HTML
+        elif suffix in {".docx"}:
+            doc_type = DocumentType.DOCX
+        else:
+            doc_type = DocumentType.UNKNOWN
+        
+        document = Document(
+            id=doc_id,
+            kb_id=kb.id,
+            filename=file_path.name,
+            file_path=str(file_path),
+            checksum=checksum,
+            size_bytes=file_path.stat().st_size,
+            status=DocumentStatus.PENDING,
+            document_type=doc_type,
+            mime_type=mime_type,
+        )
         document = await self._repo.create_document(document)
 
         # ── Duplicate check ──────────────────────────────────────────────
         if skip_duplicates:
             existing = await self._repo.get_document_by_checksum(kb.id, checksum)
-            if existing and existing.id != document.id and existing.status == DocumentStatus.COMPLETED:
+            if existing and existing.id != document.id and existing.status == DocumentStatus.INDEXED:
                 logger.info(
                     "Skipping duplicate document",
                     name=file_path.name,
                     existing_id=existing.id,
                 )
-                document.mark_failed("Duplicate document — already ingested.")
-                document.status = DocumentStatus.SKIPPED
+                document.status = DocumentStatus.FAILED
+                document.error_message = "Duplicate document — already ingested."
                 await self._repo.update_document(document)
                 return document
 
