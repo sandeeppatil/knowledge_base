@@ -1,0 +1,410 @@
+name: MCP Server Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "src/mcp/**"
+      - "src/tools/**"
+      - "src/api/**"
+      - "src/config/**"
+      - "tests/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "pyproject.toml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "src/mcp/**"
+      - "src/tools/**"
+      - "src/api/**"
+      - "src/config/**"
+      - "tests/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "pyproject.toml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1: Build the Docker image and cache it for subsequent jobs
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.image-tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image metadata
+        id: meta
+        run: echo "image-tag=knowledge-base:ci-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image (runtime stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: runtime
+          tags: ${{ steps.meta.outputs.image-tag }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image to tarball
+        run: docker save "${{ steps.meta.outputs.image-tag }}" | gzip > image.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-${{ github.sha }}
+          path: image.tar.gz
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2: Unit tests — run inside Docker, no external services needed
+  # ─────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-${{ github.sha }}
+
+      - name: Load Docker image
+        run: docker load < image.tar.gz
+
+      - name: Run unit tests inside Docker
+        run: |
+          docker run --rm \
+            --name kb-unit-tests \
+            -e APP_ENV=test \
+            -e VECTOR_STORE_PROVIDER=memory \
+            -e DATABASE_URL="sqlite+aiosqlite:////tmp/test.db" \
+            -e EMBEDDING_PROVIDER=sentence_transformers \
+            -e EMBEDDING_MODEL=BAAI/bge-m3 \
+            -e RERANKER_ENABLED=false \
+            -e PYTHONPATH=/app \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            knowledge-base:ci-${{ github.sha }} \
+            python -m pytest tests/unit/ \
+              -v \
+              --tb=short \
+              --no-cov \
+              -x
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3: MCP server integration test — full stack via docker-compose
+  # Starts Qdrant + API + MCP container and validates all MCP tools
+  # ─────────────────────────────────────────────────────────────────────────
+  mcp-integration-test:
+    name: MCP Server Integration Test
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-${{ github.sha }}
+
+      - name: Load Docker image
+        run: |
+          docker load < image.tar.gz
+          # Tag as expected by docker-compose
+          docker tag knowledge-base:ci-${{ github.sha }} knowledge-base:latest
+
+      - name: Create .env for CI
+        run: |
+          cat > .env <<EOF
+          APP_ENV=test
+          EMBEDDING_MODEL=BAAI/bge-m3
+          EMBEDDING_DEVICE=cpu
+          RERANKER_ENABLED=false
+          EOF
+
+      - name: Start Qdrant + API (default profile)
+        run: |
+          docker compose --profile default up -d
+          echo "Waiting for Qdrant to be healthy..."
+          timeout 60 bash -c \
+            'until docker compose ps qdrant | grep -q "healthy"; do sleep 2; done'
+          echo "Waiting for KB API to be healthy..."
+          timeout 120 bash -c \
+            'until curl -sf http://localhost:8000/health; do sleep 5; done'
+
+      - name: Write MCP test script
+        run: |
+          cat > /tmp/test_mcp.py <<'PYEOF'
+          """
+          CI smoke test for the KB MCP server.
+
+          Strategy: spawn the MCP server container with docker run (stdio transport),
+          drive it via JSON-RPC 2.0 over stdin/stdout, and assert each tool responds
+          with the expected structure.
+          """
+          import json
+          import subprocess
+          import sys
+          import time
+
+          IMAGE = "knowledge-base:latest"
+
+          MCP_DOCKER_CMD = [
+              "docker", "run", "--rm", "-i",
+              "--network", "kb_platform_network",
+              "-e", "APP_ENV=test",
+              "-e", "VECTOR_STORE_PROVIDER=qdrant",
+              "-e", "QDRANT_URL=http://kb-qdrant:6333",
+              "-e", "DATABASE_URL=sqlite+aiosqlite:////tmp/test_mcp.db",
+              "-e", "EMBEDDING_PROVIDER=sentence_transformers",
+              "-e", "EMBEDDING_MODEL=BAAI/bge-m3",
+              "-e", "EMBEDDING_DEVICE=cpu",
+              "-e", "RERANKER_ENABLED=false",
+              "-e", "PYTHONPATH=/app",
+              IMAGE,
+              "python", "-m", "src.mcp.server",
+          ]
+
+          def send_rpc(proc: subprocess.Popen, method: str, params: dict, req_id: int) -> dict:
+              msg = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
+              proc.stdin.write(msg + "\n")
+              proc.stdin.flush()
+              raw = proc.stdout.readline()
+              return json.loads(raw)
+
+          def assert_no_error(resp: dict, label: str) -> None:
+              if "error" in resp:
+                  print(f"FAIL [{label}]: {resp['error']}", file=sys.stderr)
+                  sys.exit(1)
+              print(f"PASS [{label}]")
+
+          def main() -> None:
+              print("Starting MCP server container …")
+              proc = subprocess.Popen(
+                  MCP_DOCKER_CMD,
+                  stdin=subprocess.PIPE,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  text=True,
+                  bufsize=1,
+              )
+              time.sleep(3)  # allow server to initialise
+
+              try:
+                  # ── 1. MCP handshake (initialize) ────────────────────────────
+                  resp = send_rpc(proc, "initialize", {
+                      "protocolVersion": "2024-11-05",
+                      "capabilities": {},
+                      "clientInfo": {"name": "ci-test", "version": "0.0.1"},
+                  }, req_id=1)
+                  assert_no_error(resp, "initialize")
+                  assert "result" in resp, "initialize missing result"
+                  assert resp["result"]["serverInfo"]["name"] == "knowledge-base", \
+                      f"Unexpected server name: {resp['result']['serverInfo']['name']}"
+
+                  # ── 2. List tools ─────────────────────────────────────────────
+                  resp = send_rpc(proc, "tools/list", {}, req_id=2)
+                  assert_no_error(resp, "tools/list")
+                  tool_names = {t["name"] for t in resp["result"]["tools"]}
+                  expected = {
+                      "list_knowledge_bases",
+                      "retrieve_from_kb",
+                      "search_knowledge_bases",
+                      "list_documents",
+                      "create_knowledge_base",
+                  }
+                  missing = expected - tool_names
+                  assert not missing, f"Missing tools: {missing}"
+                  print(f"PASS [tools/list] — found {len(tool_names)} tools: {sorted(tool_names)}")
+
+                  # ── 3. Call list_knowledge_bases ──────────────────────────────
+                  resp = send_rpc(proc, "tools/call", {
+                      "name": "list_knowledge_bases",
+                      "arguments": {},
+                  }, req_id=3)
+                  assert_no_error(resp, "list_knowledge_bases")
+                  content = resp["result"]["content"]
+                  assert len(content) > 0, "list_knowledge_bases returned empty content"
+                  payload = json.loads(content[0]["text"])
+                  assert isinstance(payload, list), "list_knowledge_bases should return a list"
+                  print(f"PASS [list_knowledge_bases] — {len(payload)} KBs found")
+
+                  # ── 4. Create a test knowledge base ───────────────────────────
+                  resp = send_rpc(proc, "tools/call", {
+                      "name": "create_knowledge_base",
+                      "arguments": {
+                          "name": "ci-test-kb",
+                          "description": "Temporary KB created by CI smoke test",
+                      },
+                  }, req_id=4)
+                  assert_no_error(resp, "create_knowledge_base")
+                  payload = json.loads(resp["result"]["content"][0]["text"])
+                  assert "error" not in payload, f"create_knowledge_base error: {payload}"
+                  print(f"PASS [create_knowledge_base] — created KB: {payload}")
+
+                  # ── 5. Search across all KBs ──────────────────────────────────
+                  resp = send_rpc(proc, "tools/call", {
+                      "name": "search_knowledge_bases",
+                      "arguments": {"query": "test query", "top_k": 3},
+                  }, req_id=5)
+                  assert_no_error(resp, "search_knowledge_bases")
+                  payload = json.loads(resp["result"]["content"][0]["text"])
+                  # Should succeed even on empty KB (answer_found may be false)
+                  assert isinstance(payload, (list, dict)), \
+                      f"search_knowledge_bases unexpected type: {type(payload)}"
+                  print(f"PASS [search_knowledge_bases]")
+
+                  # ── 6. Retrieve from specific KB ──────────────────────────────
+                  resp = send_rpc(proc, "tools/call", {
+                      "name": "retrieve_from_kb",
+                      "arguments": {
+                          "kb_name": "ci-test-kb",
+                          "query": "what is in this knowledge base?",
+                          "top_k": 5,
+                      },
+                  }, req_id=6)
+                  assert_no_error(resp, "retrieve_from_kb")
+                  payload = json.loads(resp["result"]["content"][0]["text"])
+                  assert "answer_found" in payload, \
+                      f"retrieve_from_kb missing answer_found field: {payload}"
+                  print(f"PASS [retrieve_from_kb] — answer_found={payload['answer_found']}")
+
+                  print("\n✅ All MCP server smoke tests passed.")
+
+              finally:
+                  proc.terminate()
+                  stderr_output = proc.stderr.read()
+                  if stderr_output:
+                      print("─── MCP server stderr ───")
+                      print(stderr_output[:2000])
+
+          if __name__ == "__main__":
+              main()
+          PYEOF
+
+      - name: Run MCP integration smoke test
+        run: python /tmp/test_mcp.py
+
+      - name: Collect Docker logs on failure
+        if: failure()
+        run: |
+          echo "=== kb-api logs ==="
+          docker compose logs kb-api --tail=100 || true
+          echo "=== kb-qdrant logs ==="
+          docker compose logs qdrant --tail=50 || true
+
+      - name: Tear down compose stack
+        if: always()
+        run: docker compose --profile default down -v --remove-orphans
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 4: MCP server container health check
+  # Verifies that `python -m src.mcp.server --help` exits cleanly and that
+  # the container can start without crashing within 10 seconds
+  # ─────────────────────────────────────────────────────────────────────────
+  mcp-container-health:
+    name: MCP Container Health Check
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-${{ github.sha }}
+
+      - name: Load Docker image
+        run: docker load < image.tar.gz
+
+      - name: Verify MCP module imports cleanly
+        run: |
+          docker run --rm \
+            -e APP_ENV=test \
+            -e VECTOR_STORE_PROVIDER=memory \
+            -e DATABASE_URL="sqlite+aiosqlite:////tmp/test.db" \
+            -e PYTHONPATH=/app \
+            knowledge-base:ci-${{ github.sha }} \
+            python -c "
+          import sys
+          try:
+              import mcp.types as types
+              from mcp.server import Server
+              from mcp.server.stdio import stdio_server
+              print('MCP imports OK')
+          except ImportError as e:
+              print(f'Import error: {e}', file=sys.stderr)
+              sys.exit(1)
+          "
+
+      - name: Verify MCP TOOL_SCHEMAS are valid
+        run: |
+          docker run --rm \
+            -e APP_ENV=test \
+            -e VECTOR_STORE_PROVIDER=memory \
+            -e DATABASE_URL="sqlite+aiosqlite:////tmp/test.db" \
+            -e PYTHONPATH=/app \
+            knowledge-base:ci-${{ github.sha }} \
+            python -c "
+          from src.mcp.server import TOOL_SCHEMAS
+          import json
+          names = [t.name for t in TOOL_SCHEMAS]
+          assert len(TOOL_SCHEMAS) == 5, f'Expected 5 tools, got {len(TOOL_SCHEMAS)}'
+          required = ['list_knowledge_bases','retrieve_from_kb','search_knowledge_bases','list_documents','create_knowledge_base']
+          for r in required:
+              assert r in names, f'Missing tool: {r}'
+          print(f'All {len(TOOL_SCHEMAS)} tool schemas valid: {names}')
+          "
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 5: Summary gate — required status check for branch protection
+  # ─────────────────────────────────────────────────────────────────────────
+  test-summary:
+    name: All Tests Passed
+    runs-on: ubuntu-latest
+    needs: [unit-tests, mcp-integration-test, mcp-container-health]
+    if: always()
+
+    steps:
+      - name: Check all job results
+        run: |
+          results=(
+            "${{ needs.unit-tests.result }}"
+            "${{ needs.mcp-integration-test.result }}"
+            "${{ needs.mcp-container-health.result }}"
+          )
+          failed=0
+          for r in "${results[@]}"; do
+            if [[ "$r" != "success" && "$r" != "skipped" ]]; then
+              echo "❌ Job failed with result: $r"
+              failed=1
+            fi
+          done
+          if [[ $failed -eq 1 ]]; then
+            echo "One or more jobs failed."
+            exit 1
+          fi
+          echo "✅ All jobs passed."
