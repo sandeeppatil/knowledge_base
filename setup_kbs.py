@@ -50,7 +50,7 @@ async def main() -> int:
             logger.info(f"✓ Created space_coding_guidelines KB with id={kb2.id}")
         
         # Step 2: Ingest AUTOSAR PDF
-        pdf1_path = Path("/home/sandeep/workspace/kb/data/knowledge_bases/space_autosar/AUTOSAR_SWS_COM.pdf")
+        pdf1_path = Path("/home/sandeep/workspace/kb/data/uploads/space_autosar/AUTOSAR_SWS_COM.pdf")
         logger.info(f"PDF1 path: {pdf1_path}")
         logger.info(f"PDF1 exists: {pdf1_path.exists()}")
         if pdf1_path.exists():
@@ -66,7 +66,7 @@ async def main() -> int:
             logger.warning(f"File not found: {pdf1_path}")
         
         # Step 2: Ingest C++ PDF
-        pdf2_path = Path("/home/sandeep/workspace/kb/data/knowledge_bases/space_coding_guidelines/C++ Coding Standards.pdf")
+        pdf2_path = Path("/home/sandeep/workspace/kb/data/uploads/space_coding_guidelines/C++ Coding Standards.pdf")
         logger.info(f"PDF2 path: {pdf2_path}")
         logger.info(f"PDF2 exists: {pdf2_path.exists()}")
         if pdf2_path.exists():

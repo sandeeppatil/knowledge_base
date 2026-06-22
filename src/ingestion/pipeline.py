@@ -234,7 +234,8 @@ class IngestionPipeline:
                     name=file_path.name,
                     error=str(exc),
                 )
-                document.mark_failed(str(exc))
+                document.status = DocumentStatus.FAILED
+                document.error_message = str(exc)
                 await self._repo.update_document(document)
 
                 DOCUMENTS_FAILED_TOTAL.labels(
