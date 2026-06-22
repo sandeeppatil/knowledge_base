@@ -66,7 +66,7 @@ class PyMuPDFParser(DocumentParser):
         pdf = fitz.open(str(path))
         result = ParsedDocumentResult(
             document_id=document.id,
-            document_name=document.name,
+            document_name=document.filename,
             source_path=str(path),
             page_count=pdf.page_count,
             parser_used="pymupdf",

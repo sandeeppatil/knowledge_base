@@ -49,6 +49,9 @@ class KnowledgeBaseORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     embedding_model: Mapped[str] = mapped_column(String(200))
+    embedding_dimension: Mapped[int] = mapped_column(Integer, default=1024)
+    vector_store_type: Mapped[str] = mapped_column(String(50), default="qdrant")
+    collection_name: Mapped[str] = mapped_column(String(200), nullable=False)
     vector_store: Mapped[str] = mapped_column(String(50))
     version: Mapped[str] = mapped_column(String(20), default="1.0.0")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -88,9 +91,9 @@ def _kb_from_orm(row: KnowledgeBaseORM) -> KnowledgeBase:
         created_at=row.created_at,
         updated_at=row.updated_at,
         embedding_model=row.embedding_model,
-        vector_store=row.vector_store,
-        version=row.version,
-        is_active=row.is_active,
+        embedding_dimension=row.embedding_dimension,
+        vector_store_type=row.vector_store_type,
+        collection_name=row.collection_name,
         metadata=json.loads(row.metadata_json),
     )
 
@@ -98,19 +101,18 @@ def _kb_from_orm(row: KnowledgeBaseORM) -> KnowledgeBase:
 def _doc_from_orm(row: DocumentORM) -> Document:
     return Document(
         id=row.id,
-        knowledge_base_id=row.knowledge_base_id,
-        name=row.name,
-        source_path=row.source_path,
+        kb_id=row.knowledge_base_id,
+        filename=row.name,
+        file_path=row.source_path,
         document_type=DocumentType(row.document_type),
-        file_size_bytes=row.file_size_bytes,
+        size_bytes=row.file_size_bytes,
         page_count=row.page_count,
         chunk_count=row.chunk_count,
         status=DocumentStatus(row.status),
         error_message=row.error_message,
         checksum=row.checksum,
-        parser_used=row.parser_used,
         created_at=row.created_at,
-        processed_at=row.processed_at,
+        ingestion_completed_at=row.processed_at,
         metadata=json.loads(row.metadata_json),
     )
 
@@ -151,7 +153,10 @@ class SQLiteKBRepository(KBRepository):
                 created_at=kb.created_at,
                 updated_at=kb.updated_at,
                 embedding_model=kb.embedding_model,
-                vector_store=kb.vector_store,
+                embedding_dimension=kb.embedding_dimension,
+                vector_store_type=kb.vector_store_type,
+                collection_name=kb.collection_name,
+                vector_store=kb.vector_store_type,
                 version=kb.version,
                 is_active=kb.is_active,
                 metadata_json=json.dumps(kb.metadata),
@@ -196,7 +201,10 @@ class SQLiteKBRepository(KBRepository):
                     chunk_count=kb.chunk_count,
                     updated_at=kb.updated_at,
                     embedding_model=kb.embedding_model,
-                    vector_store=kb.vector_store,
+                    embedding_dimension=kb.embedding_dimension,
+                    vector_store_type=kb.vector_store_type,
+                    collection_name=kb.collection_name,
+                    vector_store=kb.vector_store_type,
                     version=kb.version,
                     is_active=kb.is_active,
                     metadata_json=json.dumps(kb.metadata),
@@ -222,23 +230,24 @@ class SQLiteKBRepository(KBRepository):
         async with self._session_factory() as session:
             row = DocumentORM(
                 id=document.id,
-                knowledge_base_id=document.knowledge_base_id,
-                name=document.name,
-                source_path=document.source_path,
+                knowledge_base_id=document.kb_id,
+                name=document.filename,
+                source_path=document.file_path,
                 document_type=document.document_type.value,
-                file_size_bytes=document.file_size_bytes,
+                file_size_bytes=document.size_bytes,
                 page_count=document.page_count,
                 chunk_count=document.chunk_count,
                 status=document.status.value,
                 error_message=document.error_message,
                 checksum=document.checksum,
-                parser_used=document.parser_used,
+                parser_used=None,  # Not tracked in Document model
                 created_at=document.created_at,
-                processed_at=document.processed_at,
+                processed_at=document.ingestion_completed_at,
                 metadata_json=json.dumps(document.metadata),
             )
             session.add(row)
             await session.commit()
+        return document
         return document
 
     async def get_document(self, document_id: str) -> Document | None:
@@ -267,8 +276,7 @@ class SQLiteKBRepository(KBRepository):
                     status=document.status.value,
                     error_message=document.error_message,
                     checksum=document.checksum,
-                    parser_used=document.parser_used,
-                    processed_at=document.processed_at,
+                    processed_at=document.ingestion_completed_at,
                     metadata_json=json.dumps(document.metadata),
                 )
             )

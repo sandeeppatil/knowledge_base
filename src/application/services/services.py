@@ -6,6 +6,7 @@ They depend only on domain interfaces, never on concrete implementations.
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -67,17 +68,40 @@ class KnowledgeBaseService:
         if existing:
             raise ValueError(f"Knowledge base '{name}' already exists.")
 
+        # Generate KB ID and collection name
+        kb_id = str(uuid.uuid4())
+        collection_name = f"kb_{kb_id.replace('-', '_')}"
+        
+        # Get embedding dimension from provider (some providers don't expose
+        # `dimension` until after the first embed call). Try the property first
+        # and fall back to a warm-up embed to determine dimension.
+        try:
+            embedding_dimension = self._embedder.dimension
+        except Exception:
+            try:
+                vec = await self._embedder.embed_text("kb dimension probe")
+                embedding_dimension = len(vec)
+            except Exception as exc:
+                logger.error("Failed to determine embedding dimension", error=str(exc))
+                raise
+
+        embedding_model_name = embedding_model or self._embedder.model_name
+        vector_store_type = vector_store_provider or "qdrant"
+
         kb = KnowledgeBase(
+            id=kb_id,
             name=name,
             description=description,
-            embedding_model=embedding_model or self._embedder.model_name,
-            vector_store=vector_store_provider or "qdrant",
+            embedding_model=embedding_model_name,
+            embedding_dimension=embedding_dimension,
+            vector_store_type=vector_store_type,
+            collection_name=collection_name,
             metadata=metadata or {},
         )
         kb = await self._repo.create_kb(kb)
 
         # Create vector store collection
-        await self._store.create_collection(kb.collection_name, self._embedder.dimension)
+        await self._store.create_collection(kb.collection_name, embedding_dimension)
 
         KNOWLEDGE_BASES_ACTIVE.inc()
         logger.info("Knowledge base created", kb_id=kb.id, name=kb.name)

@@ -107,7 +107,7 @@ class DoclingPDFParser(DocumentParser):
 
         result = ParsedDocumentResult(
             document_id=document.id,
-            document_name=document.name,
+            document_name=document.filename,
             source_path=str(path),
             parser_used="docling",
         )
