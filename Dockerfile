@@ -72,6 +72,15 @@ RUN mkdir -p \
 # Switch to non-root user
 USER kbuser
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 3: Test image — runtime + dev/test dependencies for CI
+# ─────────────────────────────────────────────────────────────────────────────
+FROM runtime AS test
+
+USER root
+RUN /opt/venv/bin/pip install --no-cache-dir -e ".[dev]"
+USER kbuser
+
 # Environment defaults (overridden by docker-compose or env vars)
 ENV APP_ENV=production
 ENV APP_HOST=0.0.0.0

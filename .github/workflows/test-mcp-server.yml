@@ -61,14 +61,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Save image to tarball
+      - name: Build Docker image (test stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: test
+          tags: knowledge-base-test:ci-${{ github.sha }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save runtime image to tarball
         run: docker save "${{ steps.meta.outputs.image-tag }}" | gzip > image.tar.gz
 
-      - name: Upload image artifact
+      - name: Save test image to tarball
+        run: docker save "knowledge-base-test:ci-${{ github.sha }}" | gzip > image-test.tar.gz
+
+      - name: Upload runtime image artifact
         uses: actions/upload-artifact@v4
         with:
           name: docker-image-${{ github.sha }}
           path: image.tar.gz
+          retention-days: 1
+
+      - name: Upload test image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-test-${{ github.sha }}
+          path: image-test.tar.gz
           retention-days: 1
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -86,10 +107,10 @@ jobs:
       - name: Download image artifact
         uses: actions/download-artifact@v4
         with:
-          name: docker-image-${{ github.sha }}
+          name: docker-image-test-${{ github.sha }}
 
       - name: Load Docker image
-        run: docker load < image.tar.gz
+        run: docker load < image-test.tar.gz
 
       - name: Run unit tests inside Docker
         run: |
@@ -103,7 +124,7 @@ jobs:
             -e RERANKER_ENABLED=false \
             -e PYTHONPATH=/app \
             -v "${{ github.workspace }}/tests:/app/tests:ro" \
-            knowledge-base:ci-${{ github.sha }} \
+            knowledge-base-test:ci-${{ github.sha }} \
             python -m pytest tests/unit/ \
               -v \
               --tb=short \
